@@ -109,9 +109,10 @@ class KernelExplainer(Explainer):
                         "summarize the background as K samples.")
 
         # init our parameters
-        self.N = self.data.data.shape[0]
-        self.P = self.data.data.shape[1]
-        self.linkfv = np.vectorize(self.link.f)
+        self.N = self.data.data.shape[0] # num data entries
+        self.P = self.data.data.shape[1] # 10000
+        # vectorized function:  linklinearmodel(output class) = sum(featureimportancevals) to get shap's class estimation
+        self.linkfv = np.vectorize(self.link.f) 
         self.nsamplesAdded = 0
         self.nsamplesRun = 0
 
@@ -120,7 +121,7 @@ class KernelExplainer(Explainer):
             model_null = np.squeeze(model_null.values)
         if safe_isinstance(model_null, "tensorflow.python.framework.ops.EagerTensor"):
             model_null = model_null.numpy()
-        self.fnull = np.sum((model_null.T * self.data.weights).T, 0)
+        self.fnull = np.sum((model_null.T * self.data.weights).T, 0) # feature importance values sum up to model output
         self.expected_value = self.linkfv(self.fnull)
 
         # see if we have a vector output
