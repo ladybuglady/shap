@@ -133,6 +133,8 @@ def match_model_to_data(model, data):
         if isinstance(data, DenseDataWithIndex):
             out_val = model.f(data.convert_to_df())
         else:
+            # Takes all the "background data": an array of shape (entrycount, 10000)
+            # Outputs a class for each entry: an array array of shape (entrycount, 2)
             out_val = model.f(data.data)
     except Exception:
         print("Provided model function fails when applied to the provided data set.")
@@ -168,6 +170,9 @@ class SparseData(Data):
 class DenseData(Data):
     def __init__(self, data, group_names, *args):
         self.groups = args[0] if len(args) > 0 and args[0] is not None else [np.array([i]) for i in range(len(group_names))]
+
+        # Each 'group name' is the index of each time point (1-10000, (since its 5000 per lead)) as a string
+        # each 'group' is an array consisting of a timepoint of each index. so like array([700]), array([701]), etc.
 
         l = sum(len(g) for g in self.groups)
         num_samples = data.shape[0]

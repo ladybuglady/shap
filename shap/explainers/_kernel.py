@@ -36,6 +36,7 @@ log = logging.getLogger('shap')
 
 
 class KernelExplainer(Explainer):
+    
     """Uses the Kernel SHAP method to explain the output of any function.
 
     Kernel SHAP is a method that uses a special weighted linear regression
@@ -81,7 +82,7 @@ class KernelExplainer(Explainer):
     """
 
     def __init__(self, model, data, feature_names=None, link=IdentityLink(), **kwargs):
-
+        print("WORKING INSIDE OF CUSTOM SHAP")
         if feature_names is not None:
             self.data_feature_names=feature_names
         elif safe_isinstance(data, "pandas.core.frame.DataFrame"):
@@ -93,6 +94,7 @@ class KernelExplainer(Explainer):
         self.keep_index_ordered = kwargs.get("keep_index_ordered", False)
         self.model = convert_to_model(model, keep_index=self.keep_index)
         self.data = convert_to_data(data, keep_index=self.keep_index)
+        #model_null is an array of the output classes for each background data entry (an array of shape (entryCount, 2))
         model_null = match_model_to_data(self.model, self.data)
 
         # enforce our current input type limitations
