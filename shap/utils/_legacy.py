@@ -88,7 +88,7 @@ def match_instance_to_data(instance, data):
         if instance.group_display_values is None:
             instance.group_display_values = [instance.x[0, group[0]] if len(group) == 1 else "" for group in data.groups]
         assert len(instance.group_display_values) == len(data.groups)
-        instance.groups = data.groups
+        instance.groups = data.groups # group is an array for each index for each timepoint in each lead.
 
 
 class Model:
@@ -183,7 +183,7 @@ class DenseData(Data):
 
         valid = (not t and l == data.shape[1]) or (t and l == data.shape[0])
         assert valid, "# of names must match data matrix!"
-
+        
         self.weights = args[1] if len(args) > 1 else np.ones(num_samples)
         self.weights /= np.sum(self.weights)
         wl = len(self.weights)

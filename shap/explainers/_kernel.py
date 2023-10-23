@@ -121,8 +121,14 @@ class KernelExplainer(Explainer):
             model_null = np.squeeze(model_null.values)
         if safe_isinstance(model_null, "tensorflow.python.framework.ops.EagerTensor"):
             model_null = model_null.numpy()
+        # sum (Output class of entry * weight of entry)
+        # weights are weight of each data data entry (shape: (dataEntries)). 
+        # Seems like every entry is always weighted equally..?
         self.fnull = np.sum((model_null.T * self.data.weights).T, 0) # feature importance values sum up to model output
-        self.expected_value = self.linkfv(self.fnull)
+        # expected value is avg of all model outputs...
+        self.expected_value = self.linkfv(self.fnull) 
+        # Does it make sense to have an 'expected value' for a background dataset represening just 'missing values'?
+
 
         # see if we have a vector output
         self.vector_out = True
@@ -270,12 +276,14 @@ class KernelExplainer(Explainer):
         # find the feature groups we will test. If a feature does not change from its
         # current value then we know it doesn't impact the model
         self.varyingInds = self.varying_groups(instance.x)
+        print("Data groups: ", self.data.groups[0:10])  # Array of index value for each time point.
         if self.data.groups is None:
-            self.varyingFeatureGroups = np.array([i for i in self.varyingInds])
+            self.varyingFeatureGroups = np.array([i for i in self.varyingInds]) 
             self.M = self.varyingFeatureGroups.shape[0]
         else:
             self.varyingFeatureGroups = [self.data.groups[i] for i in self.varyingInds]
             self.M = len(self.varyingFeatureGroups)
+            print("M: ", self.M)
             groups = self.data.groups
             # convert to numpy array as it is much faster if not jagged array (all groups of same length)
             if self.varyingFeatureGroups and all(len(groups[i]) == len(groups[0]) for i in self.varyingInds):
@@ -283,12 +291,14 @@ class KernelExplainer(Explainer):
                 # further performance optimization in case each group has a single value
                 if self.varyingFeatureGroups.shape[1] == 1:
                     self.varyingFeatureGroups = self.varyingFeatureGroups.flatten()
+                # M is 10000, each group is one index of the timepoint..
 
         # find f(x)
         if self.keep_index:
             model_out = self.model.f(instance.convert_to_df())
         else:
-            model_out = self.model.f(instance.x)
+            model_out = self.model.f(instance.x) # using link function to get expected output from shap values
+            print("Model out: ", model_out)
         if isinstance(model_out, (pd.DataFrame, pd.Series)):
             model_out = model_out.values
         self.fx = model_out[0]
@@ -320,6 +330,8 @@ class KernelExplainer(Explainer):
 
             # if we have enough samples to enumerate all subsets then ignore the unneeded samples
             self.max_samples = 2 ** 30
+            print("samples=", self.nsamples)
+            print("max samples=", self.max_samples)
             if self.M <= 30:
                 self.max_samples = 2 ** self.M - 2
                 if self.nsamples > self.max_samples:
@@ -331,13 +343,21 @@ class KernelExplainer(Explainer):
             # weight the different subset sizes
             num_subset_sizes = int(np.ceil((self.M - 1) / 2.0))
             num_paired_subset_sizes = int(np.floor((self.M - 1) / 2.0))
+            # Weights get progressively smaller? 
             weight_vector = np.array([(self.M - 1.0) / (i * (self.M - i)) for i in range(1, num_subset_sizes + 1)])
+            print("weight vector=", weight_vector[0:10])
             weight_vector[:num_paired_subset_sizes] *= 2
+            print("weight vector=", weight_vector[0:10])
             weight_vector /= np.sum(weight_vector)
+            print("weight vector=", weight_vector[0:10])
             log.debug(f"weight_vector = {weight_vector}")
             log.debug(f"num_subset_sizes = {num_subset_sizes}")
             log.debug(f"num_paired_subset_sizes = {num_paired_subset_sizes}")
             log.debug(f"M = {self.M}")
+
+            print("num_subset_sizes=", num_subset_sizes)
+            print("num_paired_subset_sizes=", num_paired_subset_sizes)
+            print("weight vector=", weight_vector.shape)
 
             # fill out all the subset sizes we can completely enumerate
             # given nsamples*remaining_weight_vector[subset_size]
@@ -439,6 +459,8 @@ class KernelExplainer(Explainer):
             self.run()
 
             # solve then expand the feature importance (Shapley value) vector to contain the non-varying features
+            print("Groups size: ", self.data.groups_size)
+            print("D: ", self.D)
             phi = np.zeros((self.data.groups_size, self.D))
             phi_var = np.zeros((self.data.groups_size, self.D))
             for d in range(self.D):
@@ -474,6 +496,8 @@ class KernelExplainer(Explainer):
                 num_mismatches = np.sum(np.frompyfunc(self.not_equal, 2, 1)(x_group, self.data.data[:, inds]))
                 varying[i] = num_mismatches > 0
             varying_indices = np.nonzero(varying)[0]
+            print("Varying indices of a non-varying background set: ", varying_indices.shape) # (10000,)
+            print("Varying indices of a non-varying background set: ", varying_indices[0:5]) # [0 1]
             return varying_indices
         else:
             varying_indices = []
