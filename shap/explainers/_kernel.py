@@ -488,6 +488,8 @@ class KernelExplainer(Explainer):
     #num_mismatches = np.sum(np.frompyfunc(self.not_equal, 2, 1)(x_group, self.data.data[:, inds]))
     @staticmethod
     def not_equal(i, j):
+        print("inside not equal")
+        print("shape of data[:, inds] ", j)
         number_types = (int, float, np.number)
         if isinstance(i, number_types) and isinstance(j, number_types):
             return 0 if np.isclose(i, j, equal_nan=True) else 1
@@ -498,10 +500,12 @@ class KernelExplainer(Explainer):
         if not scipy.sparse.issparse(x):
             varying = np.zeros(self.data.groups_size)
             for i in range(0, self.data.groups_size):
+                print("i:", i)
                 inds = self.data.groups[i] # how are groups determined in the background? - just string of index
+                print("inds:", inds)
                 #print("cur ind: ", inds)
                 x_group = x[0, inds]
-                #print("xgroup: ", x_group)
+                print("xgroup: ", x_group)
                 if scipy.sparse.issparse(x_group):
                     print("***")
                     print("the value at the index is sparse?")
@@ -509,9 +513,13 @@ class KernelExplainer(Explainer):
                         varying[i] = False
                         continue
                     x_group = x_group.todense()
+                print("Comparing (0) value at: ", self.data.data[:, inds])
+                # comparing the value of x at index i, to all the values of each BG set sample at index i:
                 num_mismatches = np.sum(np.frompyfunc(self.not_equal, 2, 1)(x_group, self.data.data[:, inds]))
-                varying[i] = num_mismatches > 0
-            varying_indices = np.nonzero(varying)[0]
+                # an array of booleans determining if timepoint at index differs btwn x and BG
+                # True if ANY of the BG samples differ from x at that index.
+                varying[i] = num_mismatches > 0 
+            varying_indices = np.nonzero(varying)[0] # indices where at least one BG sample differs from x.
             print("Varying indices of a non-varying background set: ", varying_indices.shape) # (10000,)
             print("Varying indices of a non-varying background set: ", varying_indices[0:5]) # [0 1]
             return varying_indices
