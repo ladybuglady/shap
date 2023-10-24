@@ -166,7 +166,6 @@ class SparseData(Data):
         self.groups_size = data.shape[1]
         self.data = data
 
-
 class DenseData(Data):
     def __init__(self, data, group_names, *args):
         self.groups = args[0] if len(args) > 0 and args[0] is not None else [np.array([i]) for i in range(len(group_names))]
@@ -214,6 +213,7 @@ def convert_to_data(val, keep_index=False):
     if isinstance(val, Data):
         return val
     elif type(val) == np.ndarray:
+        print("shape of BG data: ", val.shape)
         return DenseData(val, [str(i) for i in range(val.shape[1])])
     elif str(type(val)).endswith("'pandas.core.series.Series'>"):
         return DenseData(val.values.reshape((1,len(val))), list(val.index))

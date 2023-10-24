@@ -97,6 +97,8 @@ class KernelExplainer(Explainer):
         #model_null is an array of the output classes for each background data entry (an array of shape (entryCount, 2))
         model_null = match_model_to_data(self.model, self.data)
 
+        print("Data groups in background as soon as data is stored into explainer: ", self.data.groups[0:5])
+
         # enforce our current input type limitations
         assert isinstance(self.data, DenseData) or isinstance(self.data, SparseData), \
                "Shap explainer only supports the DenseData and SparseData input currently."
@@ -222,9 +224,11 @@ class KernelExplainer(Explainer):
 
         # single instance
         if len(X.shape) == 1:
+            print("single instance")
             data = X.reshape((1, X.shape[0]))
             if self.keep_index:
                 data = convert_to_instance_with_index(data, column_name, index_name, index_value)
+            print("Data SHAPE: ", data.shape)
             explanation = self.explain(data, **kwargs)
 
             # vector-output
@@ -243,6 +247,7 @@ class KernelExplainer(Explainer):
 
         # explain the whole dataset
         elif len(X.shape) == 2:
+            print("multi instance")
             explanations = []
             for i in tqdm(range(X.shape[0]), disable=kwargs.get("silent", False)):
                 data = X[i:i + 1, :]
@@ -270,26 +275,32 @@ class KernelExplainer(Explainer):
 
     def explain(self, incoming_instance, **kwargs):
         # convert incoming input to a standardized iml object
+        print("Data groups: ", self.data.groups[0:10])
         instance = convert_to_instance(incoming_instance)
         match_instance_to_data(instance, self.data)
+        
 
         # find the feature groups we will test. If a feature does not change from its
         # current value then we know it doesn't impact the model
         self.varyingInds = self.varying_groups(instance.x)
+        print("Varying indices: ", self.varyingInds[0:5])
         print("Data groups: ", self.data.groups[0:10])  # Array of index value for each time point.
         if self.data.groups is None:
             self.varyingFeatureGroups = np.array([i for i in self.varyingInds]) 
             self.M = self.varyingFeatureGroups.shape[0]
         else:
+            # grabbing whatever index is present in the instance from the background...
             self.varyingFeatureGroups = [self.data.groups[i] for i in self.varyingInds]
             self.M = len(self.varyingFeatureGroups)
             print("M: ", self.M)
             groups = self.data.groups
             # convert to numpy array as it is much faster if not jagged array (all groups of same length)
             if self.varyingFeatureGroups and all(len(groups[i]) == len(groups[0]) for i in self.varyingInds):
+                print("each group is the same length..")
                 self.varyingFeatureGroups = np.array(self.varyingFeatureGroups)
                 # further performance optimization in case each group has a single value
                 if self.varyingFeatureGroups.shape[1] == 1:
+                    print("each group has a single value..")
                     self.varyingFeatureGroups = self.varyingFeatureGroups.flatten()
                 # M is 10000, each group is one index of the timepoint..
 
@@ -474,6 +485,7 @@ class KernelExplainer(Explainer):
 
         return phi
 
+    #num_mismatches = np.sum(np.frompyfunc(self.not_equal, 2, 1)(x_group, self.data.data[:, inds]))
     @staticmethod
     def not_equal(i, j):
         number_types = (int, float, np.number)
@@ -486,9 +498,13 @@ class KernelExplainer(Explainer):
         if not scipy.sparse.issparse(x):
             varying = np.zeros(self.data.groups_size)
             for i in range(0, self.data.groups_size):
-                inds = self.data.groups[i]
+                inds = self.data.groups[i] # how are groups determined in the background? - just string of index
+                #print("cur ind: ", inds)
                 x_group = x[0, inds]
+                #print("xgroup: ", x_group)
                 if scipy.sparse.issparse(x_group):
+                    print("***")
+                    print("the value at the index is sparse?")
                     if all(j not in x.nonzero()[1] for j in inds):
                         varying[i] = False
                         continue
