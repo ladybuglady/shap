@@ -166,8 +166,10 @@ class SparseData(Data):
         self.groups_size = data.shape[1]
         self.data = data
 
+#  DenseData(val, [str(i) for i in range(val.shape[1])])
 class DenseData(Data):
     def __init__(self, data, group_names, *args):
+        # Option to custom define groups in 'args'
         self.groups = args[0] if len(args) > 0 and args[0] is not None else [np.array([i]) for i in range(len(group_names))]
 
         # Each 'group name' is the index of each time point (1-10000, (since its 5000 per lead)) as a string

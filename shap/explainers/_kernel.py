@@ -228,7 +228,7 @@ class KernelExplainer(Explainer):
             data = X.reshape((1, X.shape[0]))
             if self.keep_index:
                 data = convert_to_instance_with_index(data, column_name, index_name, index_value)
-            print("Data SHAPE: ", data.shape)
+            print("Instance Data SHAPE: ", data.shape)
             explanation = self.explain(data, **kwargs)
 
             # vector-output
@@ -275,26 +275,32 @@ class KernelExplainer(Explainer):
 
     def explain(self, incoming_instance, **kwargs):
         # convert incoming input to a standardized iml object
-        print("Data groups: ", self.data.groups[0:10])
+        print("Background Data groups: ", self.data.groups[0:10])
         instance = convert_to_instance(incoming_instance)
         match_instance_to_data(instance, self.data)
         
 
         # find the feature groups we will test. If a feature does not change from its
         # current value then we know it doesn't impact the model
-        self.varyingInds = self.varying_groups(instance.x)
-        print("Varying indices: ", self.varyingInds[0:5])
+        self.varyingInds = self.varying_groups(instance.x) # This will always have all the indices so is there a point in having this?
+        #self.varyingInds = self.larger_groups(instance.x)
+        print("Varying indice of instance?: ", self.varyingInds[0:5])
         print("Data groups: ", self.data.groups[0:10])  # Array of index value for each time point.
         if self.data.groups is None:
             self.varyingFeatureGroups = np.array([i for i in self.varyingInds]) 
             self.M = self.varyingFeatureGroups.shape[0]
         else:
             # grabbing whatever index is present in the instance from the background...
-            self.varyingFeatureGroups = [self.data.groups[i] for i in self.varyingInds]
+            self.data.groups = self.larger_groups(instance.x)
+            self.varyingFeatureGroups = self.larger_groups(instance.x)
+            #self.varyingFeatureGroups = [self.data.groups[i] for i in self.varyingInds]
+            #print("varying Feature Groups: ", self.varyingFeatureGroups)
             self.M = len(self.varyingFeatureGroups)
             print("M: ", self.M)
             groups = self.data.groups
+            self.varyingFeatureGroups = np.array(self.varyingFeatureGroups)
             # convert to numpy array as it is much faster if not jagged array (all groups of same length)
+            '''
             if self.varyingFeatureGroups and all(len(groups[i]) == len(groups[0]) for i in self.varyingInds):
                 print("each group is the same length..")
                 self.varyingFeatureGroups = np.array(self.varyingFeatureGroups)
@@ -303,6 +309,7 @@ class KernelExplainer(Explainer):
                     print("each group has a single value..")
                     self.varyingFeatureGroups = self.varyingFeatureGroups.flatten()
                 # M is 10000, each group is one index of the timepoint..
+            '''
 
         # find f(x)
         if self.keep_index:
@@ -470,14 +477,22 @@ class KernelExplainer(Explainer):
             self.run()
 
             # solve then expand the feature importance (Shapley value) vector to contain the non-varying features
-            print("Groups size: ", self.data.groups_size)
+            #print("Groups size: ", self.data.groups_size)
             print("D: ", self.D)
             phi = np.zeros((self.data.groups_size, self.D))
             phi_var = np.zeros((self.data.groups_size, self.D))
             for d in range(self.D):
+                print("feeding into solve..")
+                print(self.nsamples)
+                print(self.max_samples)
                 vphi, vphi_var = self.solve(self.nsamples / self.max_samples, d)
-                phi[self.varyingInds, d] = vphi
-                phi_var[self.varyingInds, d] = vphi_var
+                print("vphi shape: ", vphi)
+                print("vphi_var shape: ", vphi_var)
+                #phi[self.varyingInds, d] = vphi
+                phi[:,d] = np.repeat(vphi, (self.data.groups_size/4)) # should we be repeating? or are we actually solving for 
+                # sequences of indices? :/
+                #phi_var[self.varyingInds, d] = vphi_var
+                phi_var[:,d] = np.repeat(vphi_var, (self.data.groups_size/4))
 
         if not self.vector_out:
             phi = np.squeeze(phi, axis=1)
@@ -488,8 +503,8 @@ class KernelExplainer(Explainer):
     #num_mismatches = np.sum(np.frompyfunc(self.not_equal, 2, 1)(x_group, self.data.data[:, inds]))
     @staticmethod
     def not_equal(i, j):
-        print("inside not equal")
-        print("shape of data[:, inds] ", j)
+        #print("inside not equal")
+        #print("shape of data[:, inds] ", j)
         number_types = (int, float, np.number)
         if isinstance(i, number_types) and isinstance(j, number_types):
             return 0 if np.isclose(i, j, equal_nan=True) else 1
@@ -498,14 +513,17 @@ class KernelExplainer(Explainer):
 
     def varying_groups(self, x):
         if not scipy.sparse.issparse(x):
+            print("Group size: ", self.data.groups_size)
             varying = np.zeros(self.data.groups_size)
             for i in range(0, self.data.groups_size):
-                print("i:", i)
+                #print("i:", i)
+
+                # This could be changed to select specific peaks since inds is used to grab from instance x.
                 inds = self.data.groups[i] # how are groups determined in the background? - just string of index
-                print("inds:", inds)
+                #print("inds:", inds)
                 #print("cur ind: ", inds)
                 x_group = x[0, inds]
-                print("xgroup: ", x_group)
+                #print("xgroup: ", x_group)
                 if scipy.sparse.issparse(x_group):
                     print("***")
                     print("the value at the index is sparse?")
@@ -513,12 +531,13 @@ class KernelExplainer(Explainer):
                         varying[i] = False
                         continue
                     x_group = x_group.todense()
-                print("Comparing (0) value at: ", self.data.data[:, inds])
+                #print("Comparing (0) value at: ", self.data.data[:, inds])
                 # comparing the value of x at index i, to all the values of each BG set sample at index i:
                 num_mismatches = np.sum(np.frompyfunc(self.not_equal, 2, 1)(x_group, self.data.data[:, inds]))
                 # an array of booleans determining if timepoint at index differs btwn x and BG
                 # True if ANY of the BG samples differ from x at that index.
                 varying[i] = num_mismatches > 0 
+            print("Shape of varying): ", varying.shape)
             varying_indices = np.nonzero(varying)[0] # indices where at least one BG sample differs from x.
             print("Varying indices of a non-varying background set: ", varying_indices.shape) # (10000,)
             print("Varying indices of a non-varying background set: ", varying_indices[0:5]) # [0 1]
@@ -548,6 +567,19 @@ class KernelExplainer(Explainer):
             mask[remove_unvarying_indices] = False
             varying_indices = varying_indices[mask]
             return varying_indices
+
+    ##############################
+    # "Superpixels" for a signal #
+    ##############################
+    def larger_groups(self, x):
+        # large groups (quarters) to force shap values into larger regions
+        # remember that same point in time across both leads should be force-shared**
+        #for i in range(4):
+        #    return 0
+        return [np.arange(0,500), np.arange(500,1000), np.arange(1000,1500), np.arange(1500,2000)]
+        
+
+
 
     def allocate(self):
         if scipy.sparse.issparse(self.data.data):
@@ -638,7 +670,10 @@ class KernelExplainer(Explainer):
             self.nsamplesRun += 1
 
     def solve(self, fraction_evaluated, dim):
+        print("KERNEL: ", self.kernelWeights)
         eyAdj = self.linkfv(self.ey[:, dim]) - self.link.f(self.fnull[dim])
+        print("self.ey: ", self.ey.shape)
+        print("eyAdj: ", eyAdj.shape)
         s = np.sum(self.maskMatrix, 1)
 
         # do feature selection if we have not well enumerated the space
@@ -684,8 +719,11 @@ class KernelExplainer(Explainer):
             return np.zeros(self.M), np.ones(self.M)
 
         # eliminate one variable with the constraint that all features sum to the output
+        
         eyAdj2 = eyAdj - self.maskMatrix[:, nonzero_inds[-1]] * (
                     self.link.f(self.fx[dim]) - self.link.f(self.fnull[dim]))
+        print("mask matrix: ", self.maskMatrix)
+        print("eyadj2: ", eyAdj2)
         etmp = np.transpose(np.transpose(self.maskMatrix[:, nonzero_inds[:-1]]) - self.maskMatrix[:, nonzero_inds[-1]])
         log.debug(f"etmp[:4,:] {etmp[:4, :]}")
 
