@@ -20,7 +20,6 @@ from .._explanation import Explanation
 from ..utils import safe_isinstance
 from ..utils._legacy import (
     DenseData,
-    IdentityLink,
     SparseData,
     convert_to_data,
     convert_to_instance,
@@ -36,14 +35,12 @@ log = logging.getLogger('shap')
 
 
 class KernelExplainer(Explainer):
-    
     """Uses the Kernel SHAP method to explain the output of any function.
 
     Kernel SHAP is a method that uses a special weighted linear regression
     to compute the importance of each feature. The computed importance values
     are Shapley values from game theory and also coefficients from a local linear
     regression.
-
 
     Parameters
     ----------
@@ -58,34 +55,35 @@ class KernelExplainer(Explainer):
         is observed. Since most models aren't designed to handle arbitrary missing data at test
         time, we simulate "missing" by replacing the feature with the values it takes in the
         background dataset. So if the background dataset is a simple sample of all zeros, then
-        we would approximate a feature being missing by setting it to zero. For small problems
+        we would approximate a feature being missing by setting it to zero. For small problems,
         this background dataset can be the whole training set, but for larger problems consider
-        using a single reference value or using the kmeans function to summarize the dataset.
-        Note: for sparse case we accept any sparse matrix but convert to lil format for
+        using a single reference value or using the ``kmeans`` function to summarize the dataset.
+        Note: for the sparse case, we accept any sparse matrix but convert to lil format for
         performance.
 
     feature_names : list
         The names of the features in the background dataset. If the background dataset is
-        supplied as a pandas.DataFrame, then feature_names can be set to None (the default value)
+        supplied as a pandas.DataFrame, then ``feature_names`` can be set to ``None`` (default),
         and the feature names will be taken as the column names of the dataframe.
 
     link : "identity" or "logit"
         A generalized linear model link to connect the feature importance values to the model
         output. Since the feature importance values, phi, sum up to the model output, it often makes
         sense to connect them to the output with a link function where link(output) = sum(phi).
-        If the model output is a probability then the LogitLink link function makes the feature
-        importance values have log-odds units.
+        Default is "identity" (a no-op).
+        If the model output is a probability, then "logit" can be used to transform the SHAP values
+        into log-odds units.
 
     Examples
     --------
-    See :ref:`Kernel Explainer Examples <kernel_explainer_examples>`
+    See :ref:`Kernel Explainer Examples <kernel_explainer_examples>`.
     """
 
-    def __init__(self, model, data, feature_names=None, link=IdentityLink(), **kwargs):
-        print("WORKING INSIDE OF CUSTOM SHAP")
+    def __init__(self, model, data, feature_names=None, link="identity", **kwargs):
+
         if feature_names is not None:
             self.data_feature_names=feature_names
-        elif safe_isinstance(data, "pandas.core.frame.DataFrame"):
+        elif isinstance(data, pd.DataFrame):
             self.data_feature_names = list(data.columns)
 
         # convert incoming inputs to standardized iml objects
@@ -94,10 +92,7 @@ class KernelExplainer(Explainer):
         self.keep_index_ordered = kwargs.get("keep_index_ordered", False)
         self.model = convert_to_model(model, keep_index=self.keep_index)
         self.data = convert_to_data(data, keep_index=self.keep_index)
-        #model_null is an array of the output classes for each background data entry (an array of shape (entryCount, 2))
         model_null = match_model_to_data(self.model, self.data)
-
-        print("Data groups in background as soon as data is stored into explainer: ", self.data.groups[0:5])
 
         # enforce our current input type limitations
         assert isinstance(self.data, DenseData) or isinstance(self.data, SparseData), \
@@ -111,10 +106,9 @@ class KernelExplainer(Explainer):
                         "summarize the background as K samples.")
 
         # init our parameters
-        self.N = self.data.data.shape[0] # num data entries
-        self.P = self.data.data.shape[1] # 10000
-        # vectorized function:  linklinearmodel(output class) = sum(featureimportancevals) to get shap's class estimation
-        self.linkfv = np.vectorize(self.link.f) 
+        self.N = self.data.data.shape[0]
+        self.P = self.data.data.shape[1]
+        self.linkfv = np.vectorize(self.link.f)
         self.nsamplesAdded = 0
         self.nsamplesRun = 0
 
@@ -123,14 +117,8 @@ class KernelExplainer(Explainer):
             model_null = np.squeeze(model_null.values)
         if safe_isinstance(model_null, "tensorflow.python.framework.ops.EagerTensor"):
             model_null = model_null.numpy()
-        # sum (Output class of entry * weight of entry)
-        # weights are weight of each data data entry (shape: (dataEntries)). 
-        # Seems like every entry is always weighted equally..?
-        self.fnull = np.sum((model_null.T * self.data.weights).T, 0) # feature importance values sum up to model output
-        # expected value is avg of all model outputs...
-        self.expected_value = self.linkfv(self.fnull) 
-        # Does it make sense to have an 'expected value' for a background dataset represening just 'missing values'?
-
+        self.fnull = np.sum((model_null.T * self.data.weights).T, 0)
+        self.expected_value = self.linkfv(self.fnull)
 
         # see if we have a vector output
         self.vector_out = True
@@ -146,7 +134,7 @@ class KernelExplainer(Explainer):
 
         start_time = time.time()
 
-        if safe_isinstance(X, "pandas.core.frame.DataFrame"):
+        if isinstance(X, pd.DataFrame):
             feature_names = list(X.columns)
         else:
             feature_names = getattr(self, "data_feature_names", None)
@@ -164,7 +152,7 @@ class KernelExplainer(Explainer):
         return Explanation(
             v,
             base_values=ev_tiled,
-            data=X.to_numpy() if safe_isinstance(X, "pandas.core.frame.DataFrame") else X,
+            data=X.to_numpy() if isinstance(X, pd.DataFrame) else X,
             feature_names=feature_names,
             compute_time=time.time() - start_time,
         )
@@ -205,9 +193,9 @@ class KernelExplainer(Explainer):
         """
 
         # convert dataframes
-        if str(type(X)).endswith("pandas.core.series.Series'>"):
+        if isinstance(X, pd.Series):
             X = X.values
-        elif str(type(X)).endswith("'pandas.core.frame.DataFrame'>"):
+        elif isinstance(X, pd.DataFrame):
             if self.keep_index:
                 index_value = X.index.values
                 index_name = X.index.name
@@ -224,11 +212,9 @@ class KernelExplainer(Explainer):
 
         # single instance
         if len(X.shape) == 1:
-            print("single instance")
             data = X.reshape((1, X.shape[0]))
             if self.keep_index:
                 data = convert_to_instance_with_index(data, column_name, index_name, index_value)
-            print("Instance Data SHAPE: ", data.shape)
             explanation = self.explain(data, **kwargs)
 
             # vector-output
@@ -247,7 +233,6 @@ class KernelExplainer(Explainer):
 
         # explain the whole dataset
         elif len(X.shape) == 2:
-            print("multi instance")
             explanations = []
             for i in tqdm(range(X.shape[0]), disable=kwargs.get("silent", False)):
                 data = X[i:i + 1, :]
@@ -273,50 +258,53 @@ class KernelExplainer(Explainer):
                     out[i] = explanations[i]
                 return out
 
+    def fix_features(self, incoming_instance, mask, **kwargs):
+        feat1 = (100, 1500) # sample feature spans 1000-2000th timepoints. Better way to keep this info for periodic features..
+        feats = []
+        feats.append(feat1)
+        
+        print("~~~")
+        print("0s in mask before: ", np.count_nonzero(mask==0))
+        print("1s in mask before: ", np.count_nonzero(mask==1))
+        for f in feats:
+            feat_val = np.random.randint(0, 2) # 0 or 1
+            print("random val: ", feat_val)
+            mask[f[0]:f[1]] = feat_val
+            mask[int(5000/2)+f[0]:int(5000/2)+f[1]] = feat_val # second lead
+            
+            print("0s in mask after: ", np.count_nonzero(mask==0))
+            print("1s in mask after: ", np.count_nonzero(mask==1))
+            print("~~~")
+            
+        return mask
+
     def explain(self, incoming_instance, **kwargs):
         # convert incoming input to a standardized iml object
-        print("Background Data groups: ", self.data.groups[0:10])
         instance = convert_to_instance(incoming_instance)
         match_instance_to_data(instance, self.data)
-        
 
         # find the feature groups we will test. If a feature does not change from its
         # current value then we know it doesn't impact the model
-        self.varyingInds = self.varying_groups(instance.x) # This will always have all the indices so is there a point in having this?
-        #self.varyingInds = self.larger_groups(instance.x)
-        print("Varying indice of instance?: ", self.varyingInds[0:5])
-        print("Data groups: ", self.data.groups[0:10])  # Array of index value for each time point.
+        self.varyingInds = self.varying_groups(instance.x)
         if self.data.groups is None:
-            self.varyingFeatureGroups = np.array([i for i in self.varyingInds]) 
+            self.varyingFeatureGroups = np.array([i for i in self.varyingInds])
             self.M = self.varyingFeatureGroups.shape[0]
         else:
-            # grabbing whatever index is present in the instance from the background...
-            self.data.groups = self.larger_groups(instance.x)
-            self.varyingFeatureGroups = self.larger_groups(instance.x)
-            #self.varyingFeatureGroups = [self.data.groups[i] for i in self.varyingInds]
-            #print("varying Feature Groups: ", self.varyingFeatureGroups)
+            self.varyingFeatureGroups = [self.data.groups[i] for i in self.varyingInds]
             self.M = len(self.varyingFeatureGroups)
-            print("M: ", self.M)
             groups = self.data.groups
-            self.varyingFeatureGroups = np.array(self.varyingFeatureGroups)
             # convert to numpy array as it is much faster if not jagged array (all groups of same length)
-            '''
             if self.varyingFeatureGroups and all(len(groups[i]) == len(groups[0]) for i in self.varyingInds):
-                print("each group is the same length..")
                 self.varyingFeatureGroups = np.array(self.varyingFeatureGroups)
                 # further performance optimization in case each group has a single value
                 if self.varyingFeatureGroups.shape[1] == 1:
-                    print("each group has a single value..")
                     self.varyingFeatureGroups = self.varyingFeatureGroups.flatten()
-                # M is 10000, each group is one index of the timepoint..
-            '''
 
         # find f(x)
         if self.keep_index:
             model_out = self.model.f(instance.convert_to_df())
         else:
-            model_out = self.model.f(instance.x) # using link function to get expected output from shap values
-            print("Model out: ", model_out)
+            model_out = self.model.f(instance.x)
         if isinstance(model_out, (pd.DataFrame, pd.Series)):
             model_out = model_out.values
         self.fx = model_out[0]
@@ -345,11 +333,10 @@ class KernelExplainer(Explainer):
             self.nsamples = kwargs.get("nsamples", "auto")
             if self.nsamples == "auto":
                 self.nsamples = 2 * self.M + 2**11
+                #self.nsamples = 2000 # for debugging purposes to speed things up.
 
             # if we have enough samples to enumerate all subsets then ignore the unneeded samples
             self.max_samples = 2 ** 30
-            print("samples=", self.nsamples)
-            print("max samples=", self.max_samples)
             if self.M <= 30:
                 self.max_samples = 2 ** self.M - 2
                 if self.nsamples > self.max_samples:
@@ -361,21 +348,13 @@ class KernelExplainer(Explainer):
             # weight the different subset sizes
             num_subset_sizes = int(np.ceil((self.M - 1) / 2.0))
             num_paired_subset_sizes = int(np.floor((self.M - 1) / 2.0))
-            # Weights get progressively smaller? 
             weight_vector = np.array([(self.M - 1.0) / (i * (self.M - i)) for i in range(1, num_subset_sizes + 1)])
-            print("weight vector=", weight_vector[0:10])
             weight_vector[:num_paired_subset_sizes] *= 2
-            print("weight vector=", weight_vector[0:10])
             weight_vector /= np.sum(weight_vector)
-            print("weight vector=", weight_vector[0:10])
             log.debug(f"weight_vector = {weight_vector}")
             log.debug(f"num_subset_sizes = {num_subset_sizes}")
             log.debug(f"num_paired_subset_sizes = {num_paired_subset_sizes}")
             log.debug(f"M = {self.M}")
-
-            print("num_subset_sizes=", num_subset_sizes)
-            print("num_paired_subset_sizes=", num_paired_subset_sizes)
-            print("weight vector=", weight_vector.shape)
 
             # fill out all the subset sizes we can completely enumerate
             # given nsamples*remaining_weight_vector[subset_size]
@@ -440,7 +419,11 @@ class KernelExplainer(Explainer):
                     ind = ind_set[ind_set_pos] # we call np.random.choice once to save time and then just read it here
                     ind_set_pos += 1
                     subset_size = ind + num_full_subsets + 1
+                    print("M: ", self.M)
                     mask[np.random.permutation(self.M)[:subset_size]] = 1.0
+
+                    # fix predefined features: 
+                    mask = self.fix_features(instance.x, mask)
 
                     # only add the sample if we have not seen it before, otherwise just
                     # increment a previous sample's weight
@@ -477,22 +460,12 @@ class KernelExplainer(Explainer):
             self.run()
 
             # solve then expand the feature importance (Shapley value) vector to contain the non-varying features
-            #print("Groups size: ", self.data.groups_size)
-            print("D: ", self.D)
             phi = np.zeros((self.data.groups_size, self.D))
             phi_var = np.zeros((self.data.groups_size, self.D))
             for d in range(self.D):
-                print("feeding into solve..")
-                print(self.nsamples)
-                print(self.max_samples)
                 vphi, vphi_var = self.solve(self.nsamples / self.max_samples, d)
-                print("vphi shape: ", vphi)
-                print("vphi_var shape: ", vphi_var)
-                #phi[self.varyingInds, d] = vphi
-                phi[:,d] = np.repeat(vphi, (self.data.groups_size/4)) # should we be repeating? or are we actually solving for 
-                # sequences of indices? :/
-                #phi_var[self.varyingInds, d] = vphi_var
-                phi_var[:,d] = np.repeat(vphi_var, (self.data.groups_size/4))
+                phi[self.varyingInds, d] = vphi
+                phi_var[self.varyingInds, d] = vphi_var
 
         if not self.vector_out:
             phi = np.squeeze(phi, axis=1)
@@ -500,11 +473,8 @@ class KernelExplainer(Explainer):
 
         return phi
 
-    #num_mismatches = np.sum(np.frompyfunc(self.not_equal, 2, 1)(x_group, self.data.data[:, inds]))
     @staticmethod
     def not_equal(i, j):
-        #print("inside not equal")
-        #print("shape of data[:, inds] ", j)
         number_types = (int, float, np.number)
         if isinstance(i, number_types) and isinstance(j, number_types):
             return 0 if np.isclose(i, j, equal_nan=True) else 1
@@ -513,34 +483,18 @@ class KernelExplainer(Explainer):
 
     def varying_groups(self, x):
         if not scipy.sparse.issparse(x):
-            print("Group size: ", self.data.groups_size)
             varying = np.zeros(self.data.groups_size)
             for i in range(0, self.data.groups_size):
-                #print("i:", i)
-
-                # This could be changed to select specific peaks since inds is used to grab from instance x.
-                inds = self.data.groups[i] # how are groups determined in the background? - just string of index
-                #print("inds:", inds)
-                #print("cur ind: ", inds)
+                inds = self.data.groups[i]
                 x_group = x[0, inds]
-                #print("xgroup: ", x_group)
                 if scipy.sparse.issparse(x_group):
-                    print("***")
-                    print("the value at the index is sparse?")
                     if all(j not in x.nonzero()[1] for j in inds):
                         varying[i] = False
                         continue
                     x_group = x_group.todense()
-                #print("Comparing (0) value at: ", self.data.data[:, inds])
-                # comparing the value of x at index i, to all the values of each BG set sample at index i:
                 num_mismatches = np.sum(np.frompyfunc(self.not_equal, 2, 1)(x_group, self.data.data[:, inds]))
-                # an array of booleans determining if timepoint at index differs btwn x and BG
-                # True if ANY of the BG samples differ from x at that index.
-                varying[i] = num_mismatches > 0 
-            print("Shape of varying): ", varying.shape)
-            varying_indices = np.nonzero(varying)[0] # indices where at least one BG sample differs from x.
-            print("Varying indices of a non-varying background set: ", varying_indices.shape) # (10000,)
-            print("Varying indices of a non-varying background set: ", varying_indices[0:5]) # [0 1]
+                varying[i] = num_mismatches > 0
+            varying_indices = np.nonzero(varying)[0]
             return varying_indices
         else:
             varying_indices = []
@@ -567,19 +521,6 @@ class KernelExplainer(Explainer):
             mask[remove_unvarying_indices] = False
             varying_indices = varying_indices[mask]
             return varying_indices
-
-    ##############################
-    # "Superpixels" for a signal #
-    ##############################
-    def larger_groups(self, x):
-        # large groups (quarters) to force shap values into larger regions
-        # remember that same point in time across both leads should be force-shared**
-        #for i in range(4):
-        #    return 0
-        return [np.arange(0,500), np.arange(500,1000), np.arange(1000,1500), np.arange(1500,2000)]
-        
-
-
 
     def allocate(self):
         if scipy.sparse.issparse(self.data.data):
@@ -670,10 +611,7 @@ class KernelExplainer(Explainer):
             self.nsamplesRun += 1
 
     def solve(self, fraction_evaluated, dim):
-        print("KERNEL: ", self.kernelWeights)
         eyAdj = self.linkfv(self.ey[:, dim]) - self.link.f(self.fnull[dim])
-        print("self.ey: ", self.ey.shape)
-        print("eyAdj: ", eyAdj.shape)
         s = np.sum(self.maskMatrix, 1)
 
         # do feature selection if we have not well enumerated the space
@@ -719,29 +657,43 @@ class KernelExplainer(Explainer):
             return np.zeros(self.M), np.ones(self.M)
 
         # eliminate one variable with the constraint that all features sum to the output
-        
         eyAdj2 = eyAdj - self.maskMatrix[:, nonzero_inds[-1]] * (
                     self.link.f(self.fx[dim]) - self.link.f(self.fnull[dim]))
-        print("mask matrix: ", self.maskMatrix)
-        print("eyadj2: ", eyAdj2)
         etmp = np.transpose(np.transpose(self.maskMatrix[:, nonzero_inds[:-1]]) - self.maskMatrix[:, nonzero_inds[-1]])
         log.debug(f"etmp[:4,:] {etmp[:4, :]}")
 
         # solve a weighted least squares equation to estimate phi
-        tmp = np.transpose(np.transpose(etmp) * np.transpose(self.kernelWeights))
-        etmp_dot = np.dot(np.transpose(tmp), etmp)
+        # least squares:
+        #     phi = min_w ||W^(1/2) (y - X w)||^2
+        # the corresponding normal equation:
+        #     (X' W X) phi = X' W y
+        # with
+        #     X = etmp
+        #     W = np.diag(self.kernelWeights)
+        #     y = eyAdj2
+        #
+        # We could just rely on sciki-learn
+        #     from sklearn.linear_model import LinearRegression
+        #     lm = LinearRegression(fit_intercept=False).fit(etmp, eyAdj2, sample_weight=self.kernelWeights)
+        # Under the hood, as of scikit-learn version 1.3, LinearRegression still uses np.linalg.lstsq and
+        # there are more performant options. See https://github.com/scikit-learn/scikit-learn/issues/22855.
+        y = eyAdj2
+        X = etmp
+        WX = self.kernelWeights[:, None] * X
         try:
-            tmp2 = np.linalg.inv(etmp_dot)
+            w = np.linalg.solve(X.T @ WX, WX.T @ y)
         except np.linalg.LinAlgError:
-            tmp2 = np.linalg.pinv(etmp_dot)
             warnings.warn(
-                "Linear regression equation is singular, Moore-Penrose pseudoinverse is used instead of the regular inverse.\n"
-                "To use regular inverse do one of the following:\n"
+                "Linear regression equation is singular, a least squares solutions is used instead.\n"
+                "To avoid this situation and get a regular matrix do one of the following:\n"
                 "1) turn up the number of samples,\n"
                 "2) turn up the L1 regularization with num_features(N) where N is less than the number of samples,\n"
                 "3) group features together to reduce the number of inputs that need to be explained."
             )
-        w = np.dot(tmp2, np.dot(np.transpose(tmp), eyAdj2))
+            # XWX = np.linalg.pinv(X.T @ WX)
+            # w = np.dot(XWX, np.dot(np.transpose(WX), y))
+            sqrt_W = np.sqrt(self.kernelWeights)
+            w = np.linalg.lstsq(sqrt_W[:, None] * X, sqrt_W * y, rcond=None)[0]
         log.debug(f"np.sum(w) = {np.sum(w)}")
         log.debug("self.link(self.fx) - self.link(self.fnull) = {}".format(
             self.link.f(self.fx[dim]) - self.link.f(self.fnull[dim])))
