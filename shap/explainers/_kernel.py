@@ -35,6 +35,7 @@ log = logging.getLogger('shap')
 
 
 class KernelExplainer(Explainer):
+    print("Using the custom Kernel Explainer class!")
     """Uses the Kernel SHAP method to explain the output of any function.
 
     Kernel SHAP is a method that uses a special weighted linear regression
@@ -263,20 +264,26 @@ class KernelExplainer(Explainer):
         feats = []
         feats.append(feat1)
         
-        print("~~~")
+        """print("~~~")
         print("0s in mask before: ", np.count_nonzero(mask==0))
-        print("1s in mask before: ", np.count_nonzero(mask==1))
+        print("1s in mask before: ", np.count_nonzero(mask==1))"""
         for f in feats:
             feat_val = np.random.randint(0, 2) # 0 or 1
-            print("random val: ", feat_val)
+            #print("random val: ", feat_val)
             mask[f[0]:f[1]] = feat_val
             mask[int(5000/2)+f[0]:int(5000/2)+f[1]] = feat_val # second lead
             
-            print("0s in mask after: ", np.count_nonzero(mask==0))
+            """print("0s in mask after: ", np.count_nonzero(mask==0))
             print("1s in mask after: ", np.count_nonzero(mask==1))
-            print("~~~")
+            print("~~~")"""
             
-        return mask
+        return np.concatenate([mask, mask, mask])
+
+    def define_feature_groups(self, incoming_instance, mask, **kwargs):
+        """ Define feature groups here as alternative approach...
+        Varyind indices become the indices of each feature group (so you'll have like <10 of these)"""
+            
+        return 0
 
     def explain(self, incoming_instance, **kwargs):
         # convert incoming input to a standardized iml object
@@ -285,13 +292,22 @@ class KernelExplainer(Explainer):
 
         # find the feature groups we will test. If a feature does not change from its
         # current value then we know it doesn't impact the model
-        self.varyingInds = self.varying_groups(instance.x)
+
+        # Since we want to test every feature group, every index should be 'varying'
+        #self.varyingInds = self.varying_groups(instance.x)
+        self.varyingInds = np.arange(0, instance.x.shape[1]) # 3 channels of 5000 each.
+        
+        #print("VaryingInds: ", self.varyingInds[0:100])
         if self.data.groups is None:
             self.varyingFeatureGroups = np.array([i for i in self.varyingInds])
             self.M = self.varyingFeatureGroups.shape[0]
         else:
+            print("Varying inds: ", len(self.varyingInds))
             self.varyingFeatureGroups = [self.data.groups[i] for i in self.varyingInds]
             self.M = len(self.varyingFeatureGroups)
+            print("Varying Feature Groups shape: ", len(self.varyingFeatureGroups))
+            print("When M is first declared based on how many varying Feature Groups there are..: ", self.M)
+            self.M = int(self.M / 3) # Divide M by 3 because we want the same mask for all 3 channels.
             groups = self.data.groups
             # convert to numpy array as it is much faster if not jagged array (all groups of same length)
             if self.varyingFeatureGroups and all(len(groups[i]) == len(groups[0]) for i in self.varyingInds):
@@ -361,7 +377,7 @@ class KernelExplainer(Explainer):
             num_full_subsets = 0
             num_samples_left = self.nsamples
             group_inds = np.arange(self.M, dtype='int64')
-            mask = np.zeros(self.M)
+            mask = np.zeros(self.M) 
             remaining_weight_vector = copy.copy(weight_vector)
             for subset_size in range(1, num_subset_sizes + 1):
 
@@ -419,10 +435,10 @@ class KernelExplainer(Explainer):
                     ind = ind_set[ind_set_pos] # we call np.random.choice once to save time and then just read it here
                     ind_set_pos += 1
                     subset_size = ind + num_full_subsets + 1
-                    print("M: ", self.M)
+                    # print("M: ", self.M) 15,000 for 3 channels
                     mask[np.random.permutation(self.M)[:subset_size]] = 1.0
 
-                    # fix predefined features: 
+                    # fix predefined features and triple the mask size: 
                     mask = self.fix_features(instance.x, mask)
 
                     # only add the sample if we have not seen it before, otherwise just
